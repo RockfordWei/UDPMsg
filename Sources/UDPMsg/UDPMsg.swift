@@ -10,30 +10,39 @@ public class UDPMsg {
 
   private let listener: Int32
   private var live = true
-  private var queue: DispatchQueue
+  private var queue: DispatchQueue?
   private let lock = DispatchSemaphore.init(value: 1)
   private let bufferSize = 4096
   private let buffer: UnsafeMutableRawPointer
-  public init(port: Int = 6379) throws {
+
+  /// Setup a UDP
+  /// - parameter port: if greater then 0, then it will setup a local udp server and bind to that port; 0 means udp client only.
+  /// - throws: Exception
+  public init(port: Int = 0) throws {
     #if os(Linux)
     listener = socket(AF_INET, Int32(SOCK_DGRAM.rawValue), 0)
     #else
     listener = socket(AF_INET, SOCK_DGRAM, 0)
     #endif
-    var opt: Int32 = 1
-    setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &opt, socklen_t(MemoryLayout.size(ofValue: opt)))
-    let host = UDPMsg.setupAddress(port: port)
-    var address = UDPMsg.convert(address: host)
-    guard 0 == bind(listener, &address, socklen_t(MemoryLayout<sockaddr_in>.size)) else {
-      throw Exception.unableToBind
+    if port > 0 {
+      var opt: Int32 = 1
+      setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &opt, socklen_t(MemoryLayout.size(ofValue: opt)))
+      let host = UDPMsg.setupAddress(port: port)
+      var address = UDPMsg.convert(address: host)
+      guard 0 == bind(listener, &address, socklen_t(MemoryLayout<sockaddr_in>.size)) else {
+        throw Exception.unableToBind
+      }
+      queue = DispatchQueue.init(label: "UDPMsg\(port)")
+    } else {
+      queue = nil
     }
     guard let buf = malloc(bufferSize) else {
       throw Exception.unableToAllocate
     }
     buffer = buf
-    queue = DispatchQueue.init(label: "UDPMsg\(port)")
   }
 
+  /// terminate the udp server if running
   public func terminate() {
     live = false
   }
@@ -41,8 +50,13 @@ public class UDPMsg {
   deinit {
     live = false
     free(self.buffer)
+    close(listener)
   }
 
+  /// setup a socket address by the domain name and port
+  /// - parameter domain: domain name of the objective host
+  /// - parameter port: port number of the objective host
+  /// - returns: sock address if the domain and port are valid
   public static func setupAddress(domain: String, port: Int) -> sockaddr_in? {
     guard let host = gethostbyname(domain)?.pointee,
       let first = host.h_addr_list.pointee,
@@ -62,6 +76,10 @@ public class UDPMsg {
     return setupAddress(ip: sip, port: port)
   }
 
+  /// setup a socket address by the domain name and port
+  /// - parameter ip: ip address of the objective host
+  /// - parameter port: port number of the objective host
+  /// - returns: sock address
   public static func setupAddress(ip: String = "0.0.0.0", port: Int) -> sockaddr_in {
     let ipAddr = inet_addr(ip)
     let lo = UInt16(port & 0x00FF) << 8
@@ -73,6 +91,7 @@ public class UDPMsg {
     return host
   }
 
+  /// convert an address from sockaddr_in to sockaddr
   public static func convert(address: sockaddr_in) -> sockaddr {
     var from = address
     var to = sockaddr()
@@ -80,6 +99,7 @@ public class UDPMsg {
     return to
   }
 
+  /// convert an address from sockaddr to sockaddr_in
   public static func cast(address: sockaddr) -> sockaddr_in {
     var from = address
     var to = sockaddr_in()
@@ -87,6 +107,10 @@ public class UDPMsg {
     return to
   }
 
+  /// send a udp packet
+  /// - parameter to: address to deliver
+  /// - parameter data: content to deliver
+  /// - returns: size of the packet
   public func send(to: sockaddr_in, with: Data) -> Int {
     var addr = sockaddr()
     var pto = to
@@ -94,10 +118,19 @@ public class UDPMsg {
     return self.send(to: addr, with: with)
   }
 
+  /// send a udp packet
+  /// - parameter to: address to deliver
+  /// - parameter data: content to deliver
+  /// - returns: size of the packet
   public func send(to: sockaddr, with: Data) -> Int {
     return UDPMsg.send(by: self.listener, to: to, with: with)
   }
 
+  /// send a udp packet
+  /// - parameter by: a socket number used to send data
+  /// - parameter to: address to deliver
+  /// - parameter data: content to deliver
+  /// - returns: size of the packet
   public static func send(by: Int32, to: sockaddr, with: Data) -> Int {
     return with.withUnsafeBytes{ (pointer: UnsafePointer<UInt8>) -> Int in
       var addr = to
@@ -105,8 +138,15 @@ public class UDPMsg {
     }
   }
 
+  /// run a UDP server
+  /// - parameter callback: a closure to call when a udp message arrived
+  /// - throws: Exception
   public func run(callback: @escaping (UDPMsg, Data, sockaddr_in) -> ()) throws {
-    queue.async {
+    guard let q = self.queue else {
+      throw Exception.unableToBind
+    }
+    self.live = true
+    q.async {
       while self.live {
         self.lock.wait()
         var host = sockaddr()

@@ -31,7 +31,7 @@ final class UDPMsgTests: XCTestCase {
     var total = 0
     let objective = 100
     do {
-      let server = try UDPMsg()
+      let server = try UDPMsg(port: 6379)
       try server.run { server, data, address in
         let result = data.toString()
         XCTAssertEqual(result, greetings)
