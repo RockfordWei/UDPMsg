@@ -1,7 +1,7 @@
 import Foundation
 import Dispatch
 
-public class UDPServer {
+public class UDPMsg {
 
   enum Exception: Error {
     case unableToBind
@@ -14,7 +14,7 @@ public class UDPServer {
   private let lock = DispatchSemaphore.init(value: 1)
   private let bufferSize = 4096
   private let buffer: UnsafeMutableRawPointer
-  public init(port: Int = 9898) throws {
+  public init(port: Int = 6379) throws {
     #if os(Linux)
     listener = socket(AF_INET, Int32(SOCK_DGRAM.rawValue), 0)
     #else
@@ -22,8 +22,8 @@ public class UDPServer {
     #endif
     var opt: Int32 = 1
     setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &opt, socklen_t(MemoryLayout.size(ofValue: opt)))
-    let host = UDPServer.setupAddress(port: port)
-    var address = UDPServer.convert(address: host)
+    let host = UDPMsg.setupAddress(port: port)
+    var address = UDPMsg.convert(address: host)
     guard 0 == bind(listener, &address, socklen_t(MemoryLayout<sockaddr_in>.size)) else {
       throw Exception.unableToBind
     }
@@ -31,7 +31,7 @@ public class UDPServer {
       throw Exception.unableToAllocate
     }
     buffer = buf
-    queue = DispatchQueue.init(label: "udpNotificationServer\(port)")
+    queue = DispatchQueue.init(label: "UDPMsg\(port)")
   }
 
   public func terminate() {
@@ -95,7 +95,7 @@ public class UDPServer {
   }
 
   public func send(to: sockaddr, with: Data) -> Int {
-    return UDPServer.send(by: self.listener, to: to, with: with)
+    return UDPMsg.send(by: self.listener, to: to, with: with)
   }
 
   public static func send(by: Int32, to: sockaddr, with: Data) -> Int {
@@ -105,7 +105,7 @@ public class UDPServer {
     }
   }
 
-  public func run(callback: @escaping (UDPServer, Data, sockaddr_in) -> ()) throws {
+  public func run(callback: @escaping (UDPMsg, Data, sockaddr_in) -> ()) throws {
     queue.async {
       while self.live {
         self.lock.wait()
@@ -114,7 +114,7 @@ public class UDPServer {
         let r = recvfrom(self.listener, self.buffer, self.bufferSize, 0, &host, &size)
         if r > 0 && size <= MemoryLayout<sockaddr_in>.size {
           let data = Data.init(bytes: self.buffer, count: r)
-          let address = UDPServer.cast(address: host)
+          let address = UDPMsg.cast(address: host)
           callback(self, data, address)
         }
         self.lock.signal()

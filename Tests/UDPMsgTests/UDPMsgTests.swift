@@ -22,23 +22,29 @@ final class UDPMsgTests: XCTestCase {
     ]
 
   func testDomain() {
-    let _ = UDPServer.setupAddress(domain: "store.ubiqweus.com", port: 6379)
+    let _ = UDPMsg.setupAddress(domain: "store.ubiqweus.com", port: 6379)
   }
   
   func testExample() {
     let exp = expectation(description: "generalTest")
     let greetings = "Hello, world!"
+    var total = 0
+    let objective = 100
     do {
-      let server = try UDPServer.init(port: 9898)
+      let server = try UDPMsg()
       try server.run { server, data, address in
         let result = data.toString()
         XCTAssertEqual(result, greetings)
-        print("received: result")
-        exp.fulfill()
+        print("received: ", result, total)
+        total += 1
+        if total >= objective {
+          exp.fulfill()
+        }
       }
-      sleep(1)
-      let address = UDPServer.setupAddress(ip: "127.0.0.1", port: 9898)
-      _ = server.send(to: address, with: Data.init(fromString: greetings))
+      let address = UDPMsg.setupAddress(ip: "127.0.0.1", port: 6379)
+      for _ in 0..<objective {
+        _ = server.send(to: address, with: Data.init(fromString: greetings))
+      }
       #if os(Linux)
       waitForExpectations(timeout: 5, handler: nil)
       #else
